@@ -1,0 +1,361 @@
+
+R version 4.0.3 (2020-10-10) -- "Bunny-Wunnies Freak Out"
+Copyright (C) 2020 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(modeest)
+> library(rstan)
+Loading required package: StanHeaders
+Loading required package: ggplot2
+rstan (Version 2.21.2, GitRev: 2e1f913d3ca3)
+For execution on a local, multicore CPU with excess RAM we recommend calling
+options(mc.cores = parallel::detectCores()).
+To avoid recompilation of unchanged Stan programs, we recommend calling
+rstan_options(auto_write = TRUE)
+> options(mc.cores = parallel::detectCores())
+> rstan_options(auto_write = TRUE)
+> source("helper-functions.R")
+> set.seed(123)
+> 
+> # Number of states of process 1
+> k1 <- 2
+> 
+> # Number of states of process 2
+> k2 <- 2
+> 
+> # Number of states of cartesian product of both states
+> K <- 4
+> 
+> # Transition probabilities: Covar=0
+> (Gamma0 <- t(matrix(c(0.70, 0.10, 0.10, 0.10, 
++                       0.10, 0.70, 0.10, 0.10, 
++                       0.10, 0.10, 0.70, 0.10, 
++                       0.10, 0.10, 0.10, 0.70), K,K)))
+     [,1] [,2] [,3] [,4]
+[1,]  0.7  0.1  0.1  0.1
+[2,]  0.1  0.7  0.1  0.1
+[3,]  0.1  0.1  0.7  0.1
+[4,]  0.1  0.1  0.1  0.7
+> 
+> # Transition probabilities: Covar=1
+> (Gamma1 <- t(matrix(c(0.97, 0.01, 0.01, 0.01, 
++                       0.01, 0.97, 0.01, 0.01, 
++                       0.01, 0.01, 0.97, 0.01, 
++                       0.01, 0.01, 0.01, 0.97), K,K)))
+     [,1] [,2] [,3] [,4]
+[1,] 0.97 0.01 0.01 0.01
+[2,] 0.01 0.97 0.01 0.01
+[3,] 0.01 0.01 0.97 0.01
+[4,] 0.01 0.01 0.01 0.97
+> 
+> # Initial distribution
+> delta <- c(0.25, 0.25, 0.25, 0.25)
+> 
+> # Number of observations per individual
+> nobs <- 30
+> 
+> # Number of individuals
+> nind <- 100
+> 
+> # Total number of observations
+> ntot <- nobs*nind
+> 
+> # ID of individuals
+> ID <- rep(1:nind, each=nobs)
+> 
+> # States
+> S <- c() 
+> 
+> # Loop through individuals
+> for (i in 1:nind){
++   S_ind <- rep(NA, nobs)
++   
++   # First observation
++   S_ind[1] <- sample(1:K, size=1, prob=delta)
++   
++   # Following observations: Covar=0
++   for (t in 2:(nobs/2)){
++     S_ind[t] <- sample(1:K, size=1, prob=Gamma0[S_ind[t-1],])
++   }
++   
++   # Following observations: Covar=1
++   for (t in (nobs/2+1):nobs){
++     S_ind[t] <- sample(1:K, size=1, prob=Gamma1[S_ind[t-1],])
++   }
++   
++   # Append results
++   S <- append(S, S_ind)
++ }
+> 
+> # Mapping states
+> (mapping <- matrix(c(rep(1:k1, each=k2), rep(1:k2, k1)), ncol = 2))
+     [,1] [,2]
+[1,]    1    1
+[2,]    1    2
+[3,]    2    1
+[4,]    2    2
+> 
+> # Map states to "original" two channels
+> S1 <- rep(NA,nobs) 
+> S2 <- rep(NA,nobs)
+> 
+> for (i in 1:ntot){
++   S1[i] <- mapping[S[i],1] 
++   S2[i] <- mapping[S[i],2] 
++ }
+> 
+> # Vectors for observations
+> y1 <- rep(NA, ntot) 
+> y2 <- rep(NA, ntot)
+> 
+> # State-dependent mus
+> mu1 <- c(5, 10)
+> mu2 <- c(5, 10)
+> 
+> # Simulate observations
+> for(t in 1:ntot){
++   y1[t] <- rnorm(1, mu1[S1[t]], 1)
++   y2[t] <- rnorm(1, mu2[S2[t]], 1)
++ }
+> 
+> # Covariates
+> covar <- cbind(rnorm(ntot), rnorm(ntot),                       # Random
++                rep(c(rep(0, nobs/2), rep(1, nobs/2)), nind))   # Covar
+> 
+> # Stan Data
+> stan_data <- stan_list_chmm(y1=y1, y2=y2, k1=2, k2=2, covar=covar, ID=ID)
+> 
+> # Fit
+> fit <- stan(file="CHMM_comorbidity.stan", data=stan_data,
++             pars=c("mu1", "mu2", "sigma1", "sigma2", "alpha", "beta", "z_star"),
++             chains = 4, iter = 3000, seed = 123, control = list(max_treedepth = 15))
+
+SAMPLING FOR MODEL 'CHMM_comorbidity' NOW (CHAIN 1).
+
+SAMPLING FOR MODEL 'CHMM_comorbidity' NOW (CHAIN 2).
+
+SAMPLING FOR MODEL 'CHMM_comorbidity' NOW (CHAIN 3).
+
+SAMPLING FOR MODEL 'CHMM_comorbidity' NOW (CHAIN 4).
+Chain 3: 
+Chain 3: Gradient evaluation took 0.087545 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 875.45 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+Chain 2: 
+Chain 2: Gradient evaluation took 0.09211 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 921.1 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+Chain 4: 
+Chain 4: Gradient evaluation took 0.088747 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 887.47 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: 
+Chain 1: Gradient evaluation took 0.084174 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 841.74 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+Chain 4: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 1: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 3: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 1: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 3: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 1: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 3: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 1: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 2: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 3: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 1: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 2: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 3: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 3: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 1: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 1: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 2: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 3: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 1: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 2: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 3: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 1: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 2: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 2: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 3: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 1: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 2: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 3: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 1: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 2: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 3: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 4985.01 seconds (Warm-up)
+Chain 3:                1674.66 seconds (Sampling)
+Chain 3:                6659.67 seconds (Total)
+Chain 3: 
+Chain 1: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 5131.83 seconds (Warm-up)
+Chain 1:                1691.06 seconds (Sampling)
+Chain 1:                6822.89 seconds (Total)
+Chain 1: 
+Chain 2: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 2: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 2: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 5973.29 seconds (Warm-up)
+Chain 2:                1649.16 seconds (Sampling)
+Chain 2:                7622.45 seconds (Total)
+Chain 2: 
+Chain 4: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 4: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 4: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 4: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 4: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 4: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 4: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 4: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 4: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 4: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 4: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 35535.4 seconds (Warm-up)
+Chain 4:                49243.6 seconds (Sampling)
+Chain 4:                84779.1 seconds (Total)
+Chain 4: 
+> 
+> # Results
+> print(fit, probs = c(0.05, 0.95), pars="z_star", include=F)
+Inference for Stan model: CHMM_comorbidity.
+4 chains, each with iter=3000; warmup=1500; thin=1; 
+post-warmup draws per chain=1500, total post-warmup draws=6000.
+
+                mean se_mean   sd        5%       95% n_eff Rhat
+mu1[1]          5.03    0.00 0.03      4.99      5.07  5562    1
+mu1[2]          9.96    0.00 0.03      9.92     10.01  6118    1
+mu2[1]          5.00    0.00 0.03      4.96      5.05  8258    1
+mu2[2]          9.99    0.00 0.02      9.95     10.03  5772    1
+sigma1          0.99    0.00 0.01      0.97      1.01  9293    1
+sigma2          0.99    0.00 0.01      0.97      1.01 11057    1
+alpha[1]       -3.38    0.00 0.25     -3.82     -2.99  6784    1
+alpha[2]       -3.46    0.00 0.29     -3.98     -3.02  5725    1
+alpha[3]       -3.33    0.00 0.26     -3.77     -2.93  7639    1
+alpha[4]       -3.44    0.00 0.26     -3.89     -3.04  6703    1
+alpha[5]       -3.46    0.00 0.27     -3.94     -3.04  5393    1
+alpha[6]       -3.19    0.00 0.25     -3.62     -2.80  6042    1
+alpha[7]       -3.19    0.00 0.23     -3.58     -2.82  6699    1
+alpha[8]       -3.58    0.00 0.32     -4.14     -3.09  5279    1
+alpha[9]       -3.13    0.00 0.25     -3.56     -2.74  6353    1
+alpha[10]      -3.35    0.00 0.28     -3.85     -2.93  6797    1
+alpha[11]      -3.21    0.00 0.25     -3.64     -2.83  6278    1
+alpha[12]      -3.68    0.00 0.37     -4.34     -3.14  5924    1
+beta[1,1]      -0.27    0.00 0.18     -0.56      0.03 12967    1
+beta[1,2]      -0.07    0.00 0.17     -0.34      0.20 10881    1
+beta[1,3]      -2.20    0.01 0.49     -3.06     -1.43  7362    1
+beta[2,1]       0.09    0.00 0.17     -0.19      0.37  9879    1
+beta[2,2]       0.12    0.00 0.17     -0.16      0.40 11884    1
+beta[2,3]      -2.48    0.01 0.57     -3.49     -1.61  5807    1
+beta[3,1]      -0.08    0.00 0.17     -0.36      0.19 11490    1
+beta[3,2]      -0.06    0.00 0.17     -0.33      0.21 12292    1
+beta[3,3]      -2.27    0.01 0.51     -3.15     -1.48  7704    1
+beta[4,1]      -0.13    0.00 0.19     -0.43      0.17 11554    1
+beta[4,2]      -0.26    0.00 0.18     -0.56      0.04 10087    1
+beta[4,3]      -1.94    0.01 0.50     -2.80     -1.17  7803    1
+beta[5,1]      -0.07    0.00 0.18     -0.37      0.22  8266    1
+beta[5,2]       0.01    0.00 0.18     -0.29      0.30  7928    1
+beta[5,3]      -2.46    0.01 0.54     -3.41     -1.63  5352    1
+beta[6,1]       0.08    0.00 0.16     -0.19      0.35  9684    1
+beta[6,2]       0.06    0.00 0.16     -0.20      0.33  8665    1
+beta[6,3]      -2.50    0.01 0.50     -3.35     -1.74  5984    1
+beta[7,1]       0.01    0.00 0.18     -0.29      0.31 10097    1
+beta[7,2]      -0.08    0.00 0.19     -0.39      0.23  9247    1
+beta[7,3]      -2.17    0.01 0.46     -2.94     -1.44  6520    1
+beta[8,1]      -0.11    0.00 0.19     -0.42      0.21  8778    1
+beta[8,2]       0.08    0.00 0.19     -0.23      0.40  7699    1
+beta[8,3]      -2.89    0.01 0.63     -3.97     -1.94  5480    1
+beta[9,1]      -0.05    0.00 0.16     -0.32      0.22  9068    1
+beta[9,2]      -0.17    0.00 0.16     -0.44      0.10  8627    1
+beta[9,3]      -2.65    0.01 0.49     -3.48     -1.89  7645    1
+beta[10,1]      0.05    0.00 0.16     -0.22      0.31 11165    1
+beta[10,2]      0.18    0.00 0.17     -0.10      0.45 14093    1
+beta[10,3]     -2.43    0.01 0.55     -3.40     -1.60  6711    1
+beta[11,1]     -0.13    0.00 0.17     -0.39      0.15 11181    1
+beta[11,2]      0.04    0.00 0.17     -0.25      0.32 10599    1
+beta[11,3]     -2.12    0.01 0.48     -2.95     -1.37  7264    1
+beta[12,1]     -0.04    0.00 0.16     -0.30      0.23 11342    1
+beta[12,2]      0.00    0.00 0.17     -0.27      0.27 11255    1
+beta[12,3]     -3.30    0.01 0.72     -4.56     -2.24  5886    1
+lp__       -10457.23    0.11 5.35 -10466.49 -10449.03  2216    1
+
+Samples were drawn using NUTS(diag_e) at Wed Jan  6 23:03:49 2021.
+For each parameter, n_eff is a crude measure of effective sample size,
+and Rhat is the potential scale reduction factor on split chains (at 
+convergence, Rhat=1).
+> 
+> # Samples
+> samples <- extract(fit)
+> 
+> # Transition probability matrix (based on posterior means)
+> covs <- cbind(1, scale(stan_data$Covar, center = TRUE, scale=FALSE))
+> coefs <- cbind(colMeans(samples$alpha), colMeans(samples$beta))
+> tpms <- moveHMM:::trMatrix_rcpp(nbStates=4, beta = t(coefs), covs=covs)
+Registered S3 method overwritten by 'httr':
+  method         from  
+  print.response rmutil
+> 
+> # Average transition probability matrix
+> round(apply(tpms[,,stan_data$Covar[,3]==0], FUN=mean, MARGIN=1:2), 2)         # Covar == 0
+     [,1] [,2] [,3] [,4]
+[1,] 0.75 0.08 0.08 0.08
+[2,] 0.07 0.75 0.08 0.11
+[3,] 0.09 0.09 0.71 0.12
+[4,] 0.09 0.09 0.10 0.73
+> round(apply(tpms[,,stan_data$Covar[,3]==1], FUN=mean, MARGIN=1:2), 2)         # Covar == 1
+     [,1] [,2] [,3] [,4]
+[1,] 0.97 0.01 0.01 0.01
+[2,] 0.01 0.97 0.01 0.01
+[3,] 0.01 0.01 0.97 0.01
+[4,] 0.01 0.01 0.00 0.97
+> 
+> # Difference transition probability matrix
+> round(apply(tpms[,,stan_data$Covar[,3]==0], FUN=mean, MARGIN=1:2)-Gamma0, 2)  # Covar == 0
+      [,1]  [,2]  [,3]  [,4]
+[1,]  0.05 -0.02 -0.02 -0.02
+[2,] -0.03  0.05 -0.02  0.01
+[3,] -0.01 -0.01  0.01  0.02
+[4,] -0.01 -0.01  0.00  0.03
+> round(apply(tpms[,,stan_data$Covar[,3]==1], FUN=mean, MARGIN=1:2)-Gamma1, 2)  # Covar == 1
+     [,1] [,2]  [,3] [,4]
+[1,]    0    0  0.00    0
+[2,]    0    0  0.00    0
+[3,]    0    0  0.00    0
+[4,]    0    0 -0.01    0
+> 
+> # Viterbi (most frequent value)
+> z_star <- apply(samples$z_star, FUN=mfv1, MARGIN=2)
+> sum(z_star==S)
+[1] 2989
+> 
+> proc.time()
+      user     system    elapsed 
+105890.617     93.745  85306.298 

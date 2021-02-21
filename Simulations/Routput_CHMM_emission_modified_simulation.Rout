@@ -1,0 +1,322 @@
+
+R version 4.0.3 (2020-10-10) -- "Bunny-Wunnies Freak Out"
+Copyright (C) 2020 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(modeest)
+> library(rstan)
+Loading required package: StanHeaders
+Loading required package: ggplot2
+rstan (Version 2.21.2, GitRev: 2e1f913d3ca3)
+For execution on a local, multicore CPU with excess RAM we recommend calling
+options(mc.cores = parallel::detectCores()).
+To avoid recompilation of unchanged Stan programs, we recommend calling
+rstan_options(auto_write = TRUE)
+> options(mc.cores = parallel::detectCores())
+> rstan_options(auto_write = TRUE)
+> source("helper-functions.R")
+> set.seed(123)
+> 
+> # Number of states of process 1
+> k1 <- 2
+> 
+> # Number of states of process 2
+> k2 <- 2
+> 
+> # Number of states of cartesian product of both states
+> K <- 4
+> 
+> # Transition probabilities
+> (Gamma0 <- t(matrix(c(0.70, 0.10, 0.10, 0.10, 
++                       0.10, 0.70, 0.10, 0.10, 
++                       0.10, 0.10, 0.70, 0.10, 
++                       0.10, 0.10, 0.10, 0.70), K,K)))
+     [,1] [,2] [,3] [,4]
+[1,]  0.7  0.1  0.1  0.1
+[2,]  0.1  0.7  0.1  0.1
+[3,]  0.1  0.1  0.7  0.1
+[4,]  0.1  0.1  0.1  0.7
+> 
+> # Initial distribution
+> delta <- c(0.25, 0.25, 0.25, 0.25)
+> 
+> # Number of observations per individual
+> nobs <- 30
+> 
+> # Number of individuals
+> nind <- 100
+> 
+> # Total number of observations
+> ntot <- nobs*nind
+> 
+> # ID of individuals
+> ID <- rep(1:nind, each=nobs)
+> 
+> # States
+> S <- c() 
+> 
+> # Loop through individuals
+> for (i in 1:nind){
++   S_ind <- rep(NA, nobs)
++   
++   # First observation
++   S_ind[1] <- sample(1:K, size=1, prob=delta)
++   
++   # Following observations
++   for (t in 2:nobs){
++     S_ind[t] <- sample(1:K, size=1, prob=Gamma0[S_ind[t-1],])
++   }
++   
++   # Append results
++   S <- append(S, S_ind)
++ }
+> 
+> # Mapping states
+> (mapping <- matrix(c(rep(1:k1, each=k2), rep(1:k2, k1)), ncol = 2))
+     [,1] [,2]
+[1,]    1    1
+[2,]    1    2
+[3,]    2    1
+[4,]    2    2
+> 
+> # Map states to "original" two channels
+> S1 <- rep(NA,nobs) 
+> S2 <- rep(NA,nobs)
+> 
+> for (i in 1:ntot){
++   S1[i] <- mapping[S[i],1] 
++   S2[i] <- mapping[S[i],2] 
++ }
+> 
+> # Vectors for observations
+> y1 <- rep(NA, ntot) 
+> y2 <- rep(NA, ntot)
+> 
+> # Covariates
+> covar <- cbind(rnorm(ntot), rnorm(ntot),                       # Random
++                rep(c(rep(0, nobs/2), rep(1, nobs/2)), nind))   # Covar
+> 
+> # State-dependent mus based on covariate
+> mu1 <- list(c(5, 10), c(7.5, 12.5))
+> mu2 <- list(c(5, 10), c(7.5, 12.5))
+> 
+> # Simulate observations
+> for(t in 1:ntot){
++   y1[t] <- rnorm(1, mu1[[covar[t,3]+1]][S1[t]], 1)
++   y2[t] <- rnorm(1, mu2[[covar[t,3]+1]][S2[t]], 1)
++ }
+> 
+> # Stan Data
+> stan_data <- stan_list_chmm(y1=y1, y2=y2, k1=2, k2=2, covar=covar, ID=ID)
+> 
+> # Parameters
+> params <- c("alpha1", "alpha2", 
++             "beta1", "beta2",
++             "sigma1", "sigma2",
++             "pi_initial", "gamma",
++             "z_star")
+> 
+> # Function for initial values based on kmeans
+> init_fn <- function() {
++   list(alpha1 = sort(kmeans(stan_data$y1, centers = stan_data$k1)$centers), 
++        alpha2 = sort(kmeans(stan_data$y2, centers = stan_data$k2)$centers),
++        theta1 = matrix(data=0, nrow=stan_data$k1, ncol=stan_data$C),
++        theta2 = matrix(data=0, nrow=stan_data$k2, ncol=stan_data$C))
++ }
+> 
+> # Fit
+> fit <- stan(file="CHMM_emission_modified.stan", 
++             data=stan_data,
++             pars=params, 
++             init = init_fn,
++             chains = 4, iter = 3000, seed = 123, control = list(max_treedepth = 15))
+hash mismatch so recompiling; make sure Stan code ends with a blank line
+
+SAMPLING FOR MODEL 'CHMM_emission_modified' NOW (CHAIN 1).
+
+SAMPLING FOR MODEL 'CHMM_emission_modified' NOW (CHAIN 2).
+
+SAMPLING FOR MODEL 'CHMM_emission_modified' NOW (CHAIN 3).
+
+SAMPLING FOR MODEL 'CHMM_emission_modified' NOW (CHAIN 4).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.034922 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 349.22 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+Chain 2: 
+Chain 2: Gradient evaluation took 0.035481 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 354.81 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+Chain 3: 
+Chain 3: Gradient evaluation took 0.035501 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 355.01 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+Chain 4: 
+Chain 4: Gradient evaluation took 0.036386 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 363.86 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 3: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 1: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 4: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 1: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 4: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 1: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 4: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 2: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 1: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 4: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 1: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 1: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 4: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 4: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 2: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 4: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 1: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 2: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 4: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 2: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 1: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 4: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 2: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 2: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 4: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 1: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 4: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 1043.03 seconds (Warm-up)
+Chain 4:                384.904 seconds (Sampling)
+Chain 4:                1427.94 seconds (Total)
+Chain 4: 
+Chain 2: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 1: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 2: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 1: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 1026.6 seconds (Warm-up)
+Chain 1:                577.599 seconds (Sampling)
+Chain 1:                1604.2 seconds (Total)
+Chain 1: 
+Chain 2: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 2: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 2: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 1347.51 seconds (Warm-up)
+Chain 2:                517.964 seconds (Sampling)
+Chain 2:                1865.48 seconds (Total)
+Chain 2: 
+Chain 3: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 3: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 3: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 3: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 3: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 3: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 3: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 3: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 3: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 3: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 16914.1 seconds (Warm-up)
+Chain 3:                367.062 seconds (Sampling)
+Chain 3:                17281.2 seconds (Total)
+Chain 3: 
+> 
+> # Results
+> print(fit, probs = c(0.05, 0.95), pars="z_star", include=F)
+Inference for Stan model: CHMM_emission_modified.
+4 chains, each with iter=3000; warmup=1500; thin=1; 
+post-warmup draws per chain=1500, total post-warmup draws=6000.
+
+                   mean se_mean   sd        5%       95% n_eff Rhat
+alpha1[1]          6.23    0.00 0.03      6.19      6.27  6696    1
+alpha1[2]         11.29    0.00 0.03     11.25     11.34  7707    1
+alpha2[1]          6.26    0.00 0.03      6.22      6.30  6030    1
+alpha2[2]         11.22    0.00 0.03     11.17     11.26  7622    1
+beta1[1,1]        -0.01    0.00 0.03     -0.06      0.03  9178    1
+beta1[1,2]         0.02    0.00 0.03     -0.02      0.07  7039    1
+beta1[1,3]         2.40    0.00 0.05      2.31      2.49  8709    1
+beta1[2,1]        -0.01    0.00 0.03     -0.05      0.04  7787    1
+beta1[2,2]         0.01    0.00 0.03     -0.04      0.05  7611    1
+beta1[2,3]         2.45    0.00 0.05      2.37      2.54  9097    1
+beta2[1,1]        -0.01    0.00 0.02     -0.05      0.03  8104    1
+beta2[1,2]         0.00    0.00 0.03     -0.04      0.05  9178    1
+beta2[1,3]         2.51    0.00 0.05      2.43      2.60  8304    1
+beta2[2,1]         0.00    0.00 0.03     -0.04      0.04  8215    1
+beta2[2,2]        -0.04    0.00 0.03     -0.08      0.00  9508    1
+beta2[2,3]         2.48    0.00 0.05      2.40      2.57  7897    1
+sigma1             1.02    0.00 0.01      1.00      1.04  9727    1
+sigma2             1.00    0.00 0.01      0.98      1.02  8541    1
+pi_initial[1]      0.31    0.00 0.05      0.24      0.39  8424    1
+pi_initial[2]      0.23    0.00 0.04      0.17      0.30  8709    1
+pi_initial[3]      0.20    0.00 0.04      0.14      0.27  8345    1
+pi_initial[4]      0.26    0.00 0.04      0.19      0.33  8535    1
+gamma[1,1]         0.72    0.00 0.02      0.69      0.74  9065    1
+gamma[1,2]         0.10    0.00 0.01      0.08      0.12  7868    1
+gamma[1,3]         0.09    0.00 0.01      0.08      0.11  8795    1
+gamma[1,4]         0.09    0.00 0.01      0.08      0.11  8913    1
+gamma[2,1]         0.09    0.00 0.01      0.07      0.11  8595    1
+gamma[2,2]         0.71    0.00 0.02      0.68      0.74  8558    1
+gamma[2,3]         0.10    0.00 0.01      0.08      0.12  8507    1
+gamma[2,4]         0.10    0.00 0.01      0.09      0.12  8184    1
+gamma[3,1]         0.09    0.00 0.01      0.07      0.11  8723    1
+gamma[3,2]         0.09    0.00 0.01      0.07      0.11  7746    1
+gamma[3,3]         0.71    0.00 0.02      0.69      0.74  8956    1
+gamma[3,4]         0.10    0.00 0.01      0.08      0.12  8068    1
+gamma[4,1]         0.10    0.00 0.01      0.08      0.12  8188    1
+gamma[4,2]         0.10    0.00 0.01      0.08      0.11  8561    1
+gamma[4,3]         0.10    0.00 0.01      0.08      0.12  7279    1
+gamma[4,4]         0.70    0.00 0.02      0.67      0.73  7720    1
+lp__          -11714.16    0.07 4.05 -11721.39 -11708.02  3009    1
+
+Samples were drawn using NUTS(diag_e) at Wed Jan  6 04:13:15 2021.
+For each parameter, n_eff is a crude measure of effective sample size,
+and Rhat is the potential scale reduction factor on split chains (at 
+convergence, Rhat=1).
+> 
+> # Summary
+> fit_summary <- summary(fit)$summary
+> 
+> # Mu of Process 1 / State 1 / Covar = 0 (-0.5 due to centering)
+> fit_summary["alpha1[1]", "mean"] + (-0.5)*fit_summary["beta1[1,3]", "mean"]
+[1] 5.030769
+> 
+> # Mu of Process 2 / State 2 / Covar = 1 (0.5 due to centering)
+> fit_summary["alpha2[2]", "mean"] + (0.5)*fit_summary["beta2[2,3]", "mean"]
+[1] 12.45758
+> 
+> # Samples
+> samples <- extract(fit)
+> 
+> # Viterbi (most frequent value)
+> z_star <- apply(samples$z_star, FUN=mfv1, MARGIN=2)
+> sum(z_star==S)
+[1] 2983
+> 
+> proc.time()
+     user    system   elapsed 
+22359.979    24.489 17592.502 
