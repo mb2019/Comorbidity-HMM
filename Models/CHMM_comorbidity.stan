@@ -112,14 +112,16 @@ transformed parameters{
           lp[k] = log(pi_initial[k]) +
                   normal_lpdf(y1[t] | mu1[map_proc1[k]], sigma1) + 
                   normal_lpdf(y2[t] | mu2[map_proc2[k]], sigma2); 
-    }
+    } else {
     
     // Following observations
     for (k in 1:K)  // Previous forward path prob. + transition prob. + emission prob.
-        lp_p1[k] = log_sum_exp(to_vector(log_gamma_tr[t,k]) + lp) +
+        lp_p1[k] = log_sum_exp(to_vector(log_gamma_tr[t-1,k]) + lp) +
                                normal_lpdf(y1[t] | mu1[map_proc1[k]], sigma1) + 
                                normal_lpdf(y2[t] | mu2[map_proc2[k]], sigma2);
       lp=lp_p1;
+    
+    }
       
     // Add forward path prob to target at end of each individual
      if (t==N || ID[t] != ID[t+1]){
@@ -204,7 +206,7 @@ generated quantities{
         for (j in 1:K) {
           
           // Previous viterbi path + transition prob. + emission prob.
-          logp = best_logp[t-1, j] + log_gamma[t, j, k] + 
+          logp = best_logp[t-1, j] + log_gamma[t-1, j, k] + 
                  normal_lpdf(y1[t] | mu1[map_proc1[k]], sigma1) + 
                  normal_lpdf(y2[t] | mu2[map_proc2[k]], sigma2);
                  
